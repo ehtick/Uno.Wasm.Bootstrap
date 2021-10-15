@@ -65,7 +65,16 @@
     <EnableUnsafeUTF7Encoding Condition="'$(EnableUnsafeUTF7Encoding)' == ''">false</EnableUnsafeUTF7Encoding>
     <HttpActivityPropagationSupport Condition="'$(HttpActivityPropagationSupport)' == ''">false</HttpActivityPropagationSupport>
     <DebuggerSupport Condition="'$(DebuggerSupport)'==''">$(MonoRuntimeDebuggerEnabled)</DebuggerSupport>
+
+    <UseMonoRuntime>true</UseMonoRuntime>
+    <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectCapability Include="WebAssembly" />
+    <ProjectCapability Include="SupportsHotReload" />
+  </ItemGroup>
 
   <!--
     ============================================================
