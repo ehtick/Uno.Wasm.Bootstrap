@@ -63,8 +63,6 @@ namespace Uno.Wasm.Bootstrap.UnitTests
 			var result = JsStringHelper.EscapeJsString("hello\"world");
 
 			Assert.AreEqual("hello\\\"world", result, "EscapeJsString must produce backslash-quote for an input quote.");
-			Assert.IsFalse(result.Contains('/'), "EscapeJsString output must not introduce forward slashes (downstream targets must preserve bytes verbatim).");
-			Assert.IsTrue(result.Contains('\\'), "Expected literal backslash in the escaped output.");
 		}
 	}
 }

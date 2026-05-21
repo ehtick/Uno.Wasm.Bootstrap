@@ -1,20 +1,40 @@
 ﻿<Project>
 
 	<!--
-		`WriteFileVerbatimTask_v0` lives in `Uno.Wasm.Bootstrap.v0.dll`
-		(`src/Uno.Wasm.Bootstrap/WriteFileVerbatimTask.cs`). Server.targets is
-		consumed independently of Uno.Wasm.Bootstrap.targets, so we re-declare
-		the `<UsingTask>` here. The task DLL ships in both the Uno.Wasm.Bootstrap
-		and Uno.Wasm.Bootstrap.Server packages, so the file path is the same.
-		See the task source for why we cannot use `<WriteLinesToFile>` for the
-		uno-config.js fingerprint round-trip (MSBuild's item-value pipeline
-		normalises `\` to `/` and silently corrupts content that contains
-		backslashes that must be preserved).
+		`WriteFileVerbatimTask_v0` is declared inline here (via
+		`RoslynCodeTaskFactory`) rather than reused from
+		`Uno.Wasm.Bootstrap.v0.dll`: the Server nupkg does not pack that
+		task assembly, and Server.targets is consumed independently of
+		Uno.Wasm.Bootstrap.targets (by the ASP.NET Core host project, which
+		does not directly reference the WASM-side Bootstrap package). An
+		inline task keeps Server.targets self-contained without adding a
+		new packaged binary.
+
+		The companion task in `Uno.Wasm.Bootstrap` (see
+		`src/Uno.Wasm.Bootstrap/WriteFileVerbatimTask.cs`) documents why we
+		cannot use `<WriteLinesToFile>` for the uno-config.js fingerprint
+		round-trip: MSBuild's item-value pipeline normalises `\` to `/`
+		and silently corrupts content that contains backslashes that must
+		be preserved (e.g. JS `\"` escape sequences produced by
+		`ShellTask.GenerateConfig`).
 	-->
-	<PropertyGroup>
-		<_UnoServerBootstrapTaskBinary>$(MSBuildThisFileDirectory)../tools/Uno.Wasm.Bootstrap.v0.dll</_UnoServerBootstrapTaskBinary>
-	</PropertyGroup>
-	<UsingTask AssemblyFile="$(_UnoServerBootstrapTaskBinary)" TaskName="Uno.Wasm.Bootstrap.WriteFileVerbatimTask_v0" />
+	<UsingTask TaskName="WriteFileVerbatimTask_v0"
+			   TaskFactory="RoslynCodeTaskFactory"
+			   AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+		<ParameterGroup>
+			<Path ParameterType="System.String" Required="True" />
+			<Content ParameterType="System.String" Required="True" />
+		</ParameterGroup>
+		<Task>
+			<Using Namespace="System.IO" />
+			<Using Namespace="System.Text" />
+			<Code Type="Fragment" Language="cs">
+				<![CDATA[
+					File.WriteAllText(Path, Content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+				]]>
+			</Code>
+		</Task>
+	</UsingTask>
 
 	<!-- Workaround for https://github.com/unoplatform/Uno.Wasm.Bootstrap/issues/973 -->
 	<Target Name="_UnoAdjustResolveReferencedProjectsStaticWebAssetsConfiguration"
