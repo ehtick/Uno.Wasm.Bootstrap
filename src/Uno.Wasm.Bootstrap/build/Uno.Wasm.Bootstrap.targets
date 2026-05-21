@@ -315,11 +315,13 @@
 	<UsingTask Condition="!$(_WasmShellTasksPathIsDevMode)" AssemblyFile="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.GenerateUnoAssetsManifest_v0" />
 	<UsingTask Condition="!$(_WasmShellTasksPathIsDevMode)" AssemblyFile="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.StaticWebAssetsResolverTask_v0" />
 	<UsingTask Condition="!$(_WasmShellTasksPathIsDevMode)" AssemblyFile="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.GenerateUnoNativeAssetsTask_v0" />
+	<UsingTask Condition="!$(_WasmShellTasksPathIsDevMode)" AssemblyFile="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.WriteFileVerbatimTask_v0" />
 
 	<UsingTask Condition="$(_WasmShellTasksPathIsDevMode)" AssemblyFile="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.ShellTask_v0" TaskFactory="TaskHostFactory" />
 	<UsingTask Condition="$(_WasmShellTasksPathIsDevMode)" AssemblyFile="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.GenerateUnoAssetsManifest_v0" TaskFactory="TaskHostFactory" />
 	<UsingTask Condition="$(_WasmShellTasksPathIsDevMode)" AssemblyFile="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.StaticWebAssetsResolverTask_v0" TaskFactory="TaskHostFactory" />
 	<UsingTask Condition="$(_WasmShellTasksPathIsDevMode)" AssemblyFile	="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.GenerateUnoNativeAssetsTask_v0" TaskFactory="TaskHostFactory" />
+	<UsingTask Condition="$(_WasmShellTasksPathIsDevMode)" AssemblyFile="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.WriteFileVerbatimTask_v0" TaskFactory="TaskHostFactory" />
 
 	<PropertyGroup>
 		<UnoGenerateAssetsManifestDependsOn>
@@ -500,11 +502,24 @@
 			<_UnoConfigJsPath>$(IntermediateOutputPath)unowwwrootassets/uno-config.js</_UnoConfigJsPath>
 		</PropertyGroup>
 
-		<!-- Update the uno-config.js file with the fingerprinted filename if we found a fingerprint -->
-		<WriteLinesToFile
-			File="$(_UnoConfigJsPath)"
-			Lines="$([System.IO.File]::ReadAllText('$(_UnoConfigJsPath)').Replace('config.dotnet_js_filename = &quot;dotnet.js&quot;', 'config.dotnet_js_filename = &quot;dotnet.$(_UnoDotnetJsFingerprint).js&quot;').Replace('_framework/dotnet.js', '_framework/dotnet.$(_UnoDotnetJsFingerprint).js'))"
-			Overwrite="true"
+		<!--
+			Update the uno-config.js file with the fingerprinted filename if we
+			found a fingerprint. We use `WriteFileVerbatimTask_v0` rather than
+			the built-in `<WriteLinesToFile>` because the latter's `Lines`
+			parameter is `ITaskItem[]`, which routes the content through
+			MSBuild's item-value pipeline. That pipeline normalises backslash
+			(`\`) to forward slash (`/`) — treating them as path separators —
+			and silently corrupts any legitimate `\"` escape sequence emitted
+			by `ShellTask.GenerateConfig` for environment-variable values that
+			contain a double quote. The resulting `/"` terminates the JS string
+			literal prematurely and the bootstrap fails to load with
+			`SyntaxError: Unexpected identifier <whatever-followed>`. A
+			`string`-typed task parameter on a real task bypasses the item-list
+			pipeline and preserves bytes verbatim.
+		-->
+		<WriteFileVerbatimTask_v0
+			Path="$(_UnoConfigJsPath)"
+			Content="$([System.IO.File]::ReadAllText('$(_UnoConfigJsPath)').Replace('config.dotnet_js_filename = &quot;dotnet.js&quot;', 'config.dotnet_js_filename = &quot;dotnet.$(_UnoDotnetJsFingerprint).js&quot;').Replace('_framework/dotnet.js', '_framework/dotnet.$(_UnoDotnetJsFingerprint).js'))"
 			Condition="'$(_UnoDotnetJsFingerprint)' != '' AND Exists('$(_UnoConfigJsPath)')" />
 	</Target>
 
@@ -555,11 +570,15 @@
 		<Warning Text="[Uno] Could not find uno-config.js at: $(_UnoPublishConfigJsPath)"
 				 Condition="'$(_UnoActualDotnetJsFingerprint)' != '' AND !Exists('$(_UnoPublishConfigJsPath)')" />
 
-		<!-- Update uno-config.js in the publish output with the actual fingerprint -->
-		<WriteLinesToFile
-			File="$(_UnoPublishConfigJsPath)"
-			Lines="$([System.Text.RegularExpressions.Regex]::Replace($([System.Text.RegularExpressions.Regex]::Replace($([System.IO.File]::ReadAllText('$(_UnoPublishConfigJsPath)')), 'config\.dotnet_js_filename = &quot;dotnet(\.[^&quot;]+)?\.js&quot;', 'config.dotnet_js_filename = &quot;dotnet.$(_UnoActualDotnetJsFingerprint).js&quot;')), '_framework/dotnet(\.[^&quot;]+)?\.js', '_framework/dotnet.$(_UnoActualDotnetJsFingerprint).js'))"
-			Overwrite="true"
+		<!--
+			Update uno-config.js in the publish output with the actual
+			fingerprint. See the `WriteFileVerbatimTask_v0` rationale in the
+			build-time target above — the same MSBuild item-value `\` → `/`
+			corruption applies here.
+		-->
+		<WriteFileVerbatimTask_v0
+			Path="$(_UnoPublishConfigJsPath)"
+			Content="$([System.Text.RegularExpressions.Regex]::Replace($([System.Text.RegularExpressions.Regex]::Replace($([System.IO.File]::ReadAllText('$(_UnoPublishConfigJsPath)')), 'config\.dotnet_js_filename = &quot;dotnet(\.[^&quot;]+)?\.js&quot;', 'config.dotnet_js_filename = &quot;dotnet.$(_UnoActualDotnetJsFingerprint).js&quot;')), '_framework/dotnet(\.[^&quot;]+)?\.js', '_framework/dotnet.$(_UnoActualDotnetJsFingerprint).js'))"
 			Condition="'$(_UnoActualDotnetJsFingerprint)' != '' AND Exists('$(_UnoPublishConfigJsPath)')" />
 
 		<!--
@@ -951,10 +970,15 @@
 			<_UnoWorkerConfigJs Include="$(_UnoWorkerDestRoot)/**/uno-config.js" />
 		</ItemGroup>
 
-		<WriteLinesToFile
-			File="%(_UnoWorkerConfigJs.Identity)"
-			Lines="$([System.Text.RegularExpressions.Regex]::Replace($([System.Text.RegularExpressions.Regex]::Replace($([System.IO.File]::ReadAllText('%(_UnoWorkerConfigJs.Identity)')), 'config\.dotnet_js_filename = &quot;dotnet(\.[^&quot;]+)?\.js&quot;', 'config.dotnet_js_filename = &quot;dotnet.$(_UnoWorkerDotnetJsFingerprint).js&quot;')), '_framework/dotnet(\.[^&quot;]+)?\.js', '_framework/dotnet.$(_UnoWorkerDotnetJsFingerprint).js'))"
-			Overwrite="true"
+		<!--
+			Update the worker's uno-config.js fingerprint. Same MSBuild
+			item-value `\` → `/` corruption rationale as the host-side
+			fingerprint update — see the comment block on the first
+			`WriteFileVerbatimTask_v0` invocation in this file.
+		-->
+		<WriteFileVerbatimTask_v0
+			Path="%(_UnoWorkerConfigJs.Identity)"
+			Content="$([System.Text.RegularExpressions.Regex]::Replace($([System.Text.RegularExpressions.Regex]::Replace($([System.IO.File]::ReadAllText('%(_UnoWorkerConfigJs.Identity)')), 'config\.dotnet_js_filename = &quot;dotnet(\.[^&quot;]+)?\.js&quot;', 'config.dotnet_js_filename = &quot;dotnet.$(_UnoWorkerDotnetJsFingerprint).js&quot;')), '_framework/dotnet(\.[^&quot;]+)?\.js', '_framework/dotnet.$(_UnoWorkerDotnetJsFingerprint).js'))"
 			Condition="'$(_UnoWorkerDotnetJsFingerprint)' != '' AND '@(_UnoWorkerConfigJs)' != ''" />
 
 		<!-- Delete stale compressed versions of uno-config.js -->

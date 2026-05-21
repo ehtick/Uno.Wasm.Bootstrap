@@ -39,5 +39,32 @@ namespace Uno.Wasm.Bootstrap.UnitTests
 			var result = JsStringHelper.EscapeJsString(input);
 			Assert.AreEqual(expected, result);
 		}
+
+		// Regression: even though `EscapeJsString` correctly produces `\"`
+		// for `"`, the build pipeline used to corrupt that into `/"` when
+		// the uno-config.js fingerprint update target round-tripped the
+		// file through MSBuild's `<WriteLinesToFile>`. The MSBuild item-
+		// value pipeline normalised backslashes to forward slashes
+		// (treating them as path separators), turning legitimate JS
+		// escapes into invalid syntax that broke bootstrap loading with
+		// `SyntaxError: Unexpected identifier <next-token>` against
+		// whatever identifier followed the prematurely-terminated string
+		// literal.
+		//
+		// The fix replaced `<WriteLinesToFile>` with `WriteFileVerbatimTask_v0`
+		// (a real task that writes via `System.IO.File.WriteAllText`), whose
+		// `string`-typed parameters bypass the item-value pipeline and
+		// preserve bytes verbatim. This test asserts the contract
+		// `EscapeJsString` must satisfy for that downstream round-trip to
+		// remain correct.
+		[TestMethod]
+		public void When_EscapeJsString_Then_OutputContainsLiteralBackslash()
+		{
+			var result = JsStringHelper.EscapeJsString("hello\"world");
+
+			Assert.AreEqual("hello\\\"world", result, "EscapeJsString must produce backslash-quote for an input quote.");
+			Assert.IsFalse(result.Contains('/'), "EscapeJsString output must not introduce forward slashes (downstream targets must preserve bytes verbatim).");
+			Assert.IsTrue(result.Contains('\\'), "Expected literal backslash in the escaped output.");
+		}
 	}
 }
