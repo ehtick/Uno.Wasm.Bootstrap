@@ -1,5 +1,41 @@
 ﻿<Project>
 
+	<!--
+		`WriteFileVerbatimTask_v0` is declared inline here (via
+		`RoslynCodeTaskFactory`) rather than reused from
+		`Uno.Wasm.Bootstrap.v0.dll`: the Server nupkg does not pack that
+		task assembly, and Server.targets is consumed independently of
+		Uno.Wasm.Bootstrap.targets (by the ASP.NET Core host project, which
+		does not directly reference the WASM-side Bootstrap package). An
+		inline task keeps Server.targets self-contained without adding a
+		new packaged binary.
+
+		The companion task in `Uno.Wasm.Bootstrap` (see
+		`src/Uno.Wasm.Bootstrap/WriteFileVerbatimTask.cs`) documents why we
+		cannot use `<WriteLinesToFile>` for the uno-config.js fingerprint
+		round-trip: MSBuild's item-value pipeline normalises `\` to `/`
+		and silently corrupts content that contains backslashes that must
+		be preserved (e.g. JS `\"` escape sequences produced by
+		`ShellTask.GenerateConfig`).
+	-->
+	<UsingTask TaskName="WriteFileVerbatimTask_v0"
+			   TaskFactory="RoslynCodeTaskFactory"
+			   AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+		<ParameterGroup>
+			<Path ParameterType="System.String" Required="True" />
+			<Content ParameterType="System.String" Required="True" />
+		</ParameterGroup>
+		<Task>
+			<Using Namespace="System.IO" />
+			<Using Namespace="System.Text" />
+			<Code Type="Fragment" Language="cs">
+				<![CDATA[
+					File.WriteAllText(Path, Content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+				]]>
+			</Code>
+		</Task>
+	</UsingTask>
+
 	<!-- Workaround for https://github.com/unoplatform/Uno.Wasm.Bootstrap/issues/973 -->
 	<Target Name="_UnoAdjustResolveReferencedProjectsStaticWebAssetsConfiguration"
 			AfterTargets="ResolveReferencedProjectsStaticWebAssetsConfiguration"
@@ -57,11 +93,14 @@
 				 Text="[Uno.Server] Updating uno-config.js at: $(_UnoServerConfigJsPath)"
 				 Condition="'$(_UnoServerActualDotnetJsFingerprint)' != '' AND '$(_UnoServerConfigJsPath)' != '' AND Exists('$(_UnoServerConfigJsPath)')" />
 
-		<!-- Update uno-config.js in the server publish output with the actual fingerprint -->
-		<WriteLinesToFile
-			File="$(_UnoServerConfigJsPath)"
-			Lines="$([System.Text.RegularExpressions.Regex]::Replace($([System.Text.RegularExpressions.Regex]::Replace($([System.IO.File]::ReadAllText('$(_UnoServerConfigJsPath)')), 'config\.dotnet_js_filename = &quot;dotnet(\.[^&quot;]+)?\.js&quot;', 'config.dotnet_js_filename = &quot;dotnet.$(_UnoServerActualDotnetJsFingerprint).js&quot;')), '_framework/dotnet(\.[^&quot;]+)?\.js', '_framework/dotnet.$(_UnoServerActualDotnetJsFingerprint).js'))"
-			Overwrite="true"
+		<!--
+			Update uno-config.js in the server publish output with the actual
+			fingerprint. See the `WriteFileVerbatimTask_v0` doc at the top of
+			this file for why we use it here instead of `<WriteLinesToFile>`.
+		-->
+		<WriteFileVerbatimTask_v0
+			Path="$(_UnoServerConfigJsPath)"
+			Content="$([System.Text.RegularExpressions.Regex]::Replace($([System.Text.RegularExpressions.Regex]::Replace($([System.IO.File]::ReadAllText('$(_UnoServerConfigJsPath)')), 'config\.dotnet_js_filename = &quot;dotnet(\.[^&quot;]+)?\.js&quot;', 'config.dotnet_js_filename = &quot;dotnet.$(_UnoServerActualDotnetJsFingerprint).js&quot;')), '_framework/dotnet(\.[^&quot;]+)?\.js', '_framework/dotnet.$(_UnoServerActualDotnetJsFingerprint).js'))"
 			Condition="'$(_UnoServerActualDotnetJsFingerprint)' != '' AND '$(_UnoServerConfigJsPath)' != '' AND Exists('$(_UnoServerConfigJsPath)')" />
 
 		<Message Importance="normal"
