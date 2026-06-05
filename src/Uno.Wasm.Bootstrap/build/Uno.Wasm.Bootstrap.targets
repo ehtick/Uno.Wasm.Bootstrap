@@ -684,6 +684,15 @@
 			<_UnoWebGLNativeJsContent Condition="Exists('$(_UnoWebGLNativeJsPath)')">$([System.IO.File]::ReadAllText('$(_UnoWebGLNativeJsPath)'))</_UnoWebGLNativeJsContent>
 			<_UnoWebGLAlreadyPatched>$(_UnoWebGLNativeJsContent.Contains('GL.unpackRowLength = param'))</_UnoWebGLAlreadyPatched>
 			<!--
+				Only files that actually link emscripten's WebGL glue are relevant.
+				`unpackAlignment` is a stable sentinel for that glue (and is not one of
+				the tokens we rewrite). During publish the build-output dotnet.native.js
+				is the pre-relink stock runtime, which has no WebGL glue at all — without
+				this gate the stale-backport warning below would cry wolf on every publish
+				(and on any app that does not render with WebGL).
+			-->
+			<_UnoWebGLHasGlue>$(_UnoWebGLNativeJsContent.Contains('unpackAlignment'))</_UnoWebGLHasGlue>
+			<!--
 				Compute the patched content once, then verify BOTH replacements actually
 				matched. If a future emscripten changes the glue text, the Replace() calls
 				silently become no-ops; without this post-condition the target would rewrite
@@ -691,7 +700,7 @@
 				The two marker substrings are paren-free so no MSBuild %28/%29 escaping is
 				needed inside the Contains() arguments.
 			-->
-			<_UnoWebGLPatchedContent Condition="'$(_UnoWebGLNativeJsContent)' != '' AND '$(_UnoWebGLAlreadyPatched)' != 'true'">$(_UnoWebGLNativeJsContent.Replace('GL.unpackAlignment = param;', 'GL.unpackAlignment = param; } else if %28pname == 3314%29 /* GL_UNPACK_ROW_LENGTH */ { GL.unpackRowLength = param;').Replace('var plainRowSize = width * sizePerPixel;', 'var plainRowSize = %28GL.unpackRowLength || width%29 * sizePerPixel;'))</_UnoWebGLPatchedContent>
+			<_UnoWebGLPatchedContent Condition="'$(_UnoWebGLHasGlue)' == 'true' AND '$(_UnoWebGLAlreadyPatched)' != 'true'">$(_UnoWebGLNativeJsContent.Replace('GL.unpackAlignment = param;', 'GL.unpackAlignment = param; } else if %28pname == 3314%29 /* GL_UNPACK_ROW_LENGTH */ { GL.unpackRowLength = param;').Replace('var plainRowSize = width * sizePerPixel;', 'var plainRowSize = %28GL.unpackRowLength || width%29 * sizePerPixel;'))</_UnoWebGLPatchedContent>
 			<_UnoWebGLPatchApplied>false</_UnoWebGLPatchApplied>
 			<_UnoWebGLPatchApplied Condition="'$(_UnoWebGLPatchedContent)' != '' AND $(_UnoWebGLPatchedContent.Contains('GL.unpackRowLength = param')) AND $(_UnoWebGLPatchedContent.Contains('GL.unpackRowLength || width'))">true</_UnoWebGLPatchApplied>
 		</PropertyGroup>
@@ -705,8 +714,8 @@
 				 Importance="high"
 				 Text="[Uno] Backported GL_UNPACK_ROW_LENGTH fix (emscripten #21980) into $(_UnoWebGLNativeJsPath) for 4GB memory support." />
 
-		<!-- File found and not already patched, but the expected tokens were absent: the backport is stale. -->
-		<Warning Condition="'$(_UnoPatchWebGLFor4Gb)' == 'true' AND '$(_UnoWebGLNativeJsContent)' != '' AND '$(_UnoWebGLAlreadyPatched)' != 'true' AND '$(_UnoWebGLPatchApplied)' != 'true'"
+		<!-- WebGL glue is present but our tokens did not produce the marker: the backport is stale. -->
+		<Warning Condition="'$(_UnoWebGLHasGlue)' == 'true' AND '$(_UnoWebGLAlreadyPatched)' != 'true' AND '$(_UnoWebGLPatchApplied)' != 'true'"
 				 Text="[Uno] The 4GB WebGL fix (emscripten #21980) could NOT be applied to $(_UnoWebGLNativeJsPath): the expected emscripten GL glue tokens were not found. The runtime's emscripten version likely changed — update the backport in Uno.Wasm.Bootstrap.targets." />
 	</Target>
 
@@ -752,8 +761,10 @@
 			<_UnoWebGLNativeJsPublishPath>@(_UnoWebGLNativeJsPublish->'%(FullPath)')</_UnoWebGLNativeJsPublishPath>
 			<_UnoWebGLNativeJsPublishContent Condition="Exists('$(_UnoWebGLNativeJsPublishPath)')">$([System.IO.File]::ReadAllText('$(_UnoWebGLNativeJsPublishPath)'))</_UnoWebGLNativeJsPublishContent>
 			<_UnoWebGLPublishAlreadyPatched>$(_UnoWebGLNativeJsPublishContent.Contains('GL.unpackRowLength = param'))</_UnoWebGLPublishAlreadyPatched>
-			<!-- See the build-output target: compute once, then verify both replacements matched before writing/deleting/logging. -->
-			<_UnoWebGLPublishPatchedContent Condition="'$(_UnoWebGLNativeJsPublishContent)' != '' AND '$(_UnoWebGLPublishAlreadyPatched)' != 'true'">$(_UnoWebGLNativeJsPublishContent.Replace('GL.unpackAlignment = param;', 'GL.unpackAlignment = param; } else if %28pname == 3314%29 /* GL_UNPACK_ROW_LENGTH */ { GL.unpackRowLength = param;').Replace('var plainRowSize = width * sizePerPixel;', 'var plainRowSize = %28GL.unpackRowLength || width%29 * sizePerPixel;'))</_UnoWebGLPublishPatchedContent>
+			<!-- See the build-output target: only act on files that actually link the WebGL glue. -->
+			<_UnoWebGLPublishHasGlue>$(_UnoWebGLNativeJsPublishContent.Contains('unpackAlignment'))</_UnoWebGLPublishHasGlue>
+			<!-- Compute once, then verify both replacements matched before writing/deleting/logging. -->
+			<_UnoWebGLPublishPatchedContent Condition="'$(_UnoWebGLPublishHasGlue)' == 'true' AND '$(_UnoWebGLPublishAlreadyPatched)' != 'true'">$(_UnoWebGLNativeJsPublishContent.Replace('GL.unpackAlignment = param;', 'GL.unpackAlignment = param; } else if %28pname == 3314%29 /* GL_UNPACK_ROW_LENGTH */ { GL.unpackRowLength = param;').Replace('var plainRowSize = width * sizePerPixel;', 'var plainRowSize = %28GL.unpackRowLength || width%29 * sizePerPixel;'))</_UnoWebGLPublishPatchedContent>
 			<_UnoWebGLPublishPatchApplied>false</_UnoWebGLPublishPatchApplied>
 			<_UnoWebGLPublishPatchApplied Condition="'$(_UnoWebGLPublishPatchedContent)' != '' AND $(_UnoWebGLPublishPatchedContent.Contains('GL.unpackRowLength = param')) AND $(_UnoWebGLPublishPatchedContent.Contains('GL.unpackRowLength || width'))">true</_UnoWebGLPublishPatchApplied>
 		</PropertyGroup>
@@ -775,8 +786,8 @@
 				 Importance="high"
 				 Text="[Uno] Backported GL_UNPACK_ROW_LENGTH fix (emscripten #21980) into published $(_UnoWebGLNativeJsPublishPath) for 4GB memory support." />
 
-		<!-- File found and not already patched, but the expected tokens were absent: the backport is stale. -->
-		<Warning Condition="'$(_UnoPatchWebGLFor4Gb)' == 'true' AND '$(_UnoWebGLNativeJsPublishContent)' != '' AND '$(_UnoWebGLPublishAlreadyPatched)' != 'true' AND '$(_UnoWebGLPublishPatchApplied)' != 'true'"
+		<!-- WebGL glue is present but our tokens did not produce the marker: the backport is stale. -->
+		<Warning Condition="'$(_UnoWebGLPublishHasGlue)' == 'true' AND '$(_UnoWebGLPublishAlreadyPatched)' != 'true' AND '$(_UnoWebGLPublishPatchApplied)' != 'true'"
 				 Text="[Uno] The 4GB WebGL fix (emscripten #21980) could NOT be applied to published $(_UnoWebGLNativeJsPublishPath): the expected emscripten GL glue tokens were not found. The runtime's emscripten version likely changed — update the backport in Uno.Wasm.Bootstrap.targets." />
 	</Target>
 
