@@ -316,12 +316,14 @@
 	<UsingTask Condition="!$(_WasmShellTasksPathIsDevMode)" AssemblyFile="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.StaticWebAssetsResolverTask_v0" />
 	<UsingTask Condition="!$(_WasmShellTasksPathIsDevMode)" AssemblyFile="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.GenerateUnoNativeAssetsTask_v0" />
 	<UsingTask Condition="!$(_WasmShellTasksPathIsDevMode)" AssemblyFile="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.WriteFileVerbatimTask_v0" />
+	<UsingTask Condition="!$(_WasmShellTasksPathIsDevMode)" AssemblyFile="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.PatchWebGLNativeJsForMaxMemoryTask_v0" />
 
 	<UsingTask Condition="$(_WasmShellTasksPathIsDevMode)" AssemblyFile="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.ShellTask_v0" TaskFactory="TaskHostFactory" />
 	<UsingTask Condition="$(_WasmShellTasksPathIsDevMode)" AssemblyFile="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.GenerateUnoAssetsManifest_v0" TaskFactory="TaskHostFactory" />
 	<UsingTask Condition="$(_WasmShellTasksPathIsDevMode)" AssemblyFile="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.StaticWebAssetsResolverTask_v0" TaskFactory="TaskHostFactory" />
 	<UsingTask Condition="$(_WasmShellTasksPathIsDevMode)" AssemblyFile	="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.GenerateUnoNativeAssetsTask_v0" TaskFactory="TaskHostFactory" />
 	<UsingTask Condition="$(_WasmShellTasksPathIsDevMode)" AssemblyFile="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.WriteFileVerbatimTask_v0" TaskFactory="TaskHostFactory" />
+	<UsingTask Condition="$(_WasmShellTasksPathIsDevMode)" AssemblyFile="$(WasmShellTasksPath)/Uno.Wasm.Bootstrap.v0.dll" TaskName="Uno.Wasm.Bootstrap.PatchWebGLNativeJsForMaxMemoryTask_v0" TaskFactory="TaskHostFactory" />
 
 	<PropertyGroup>
 		<UnoGenerateAssetsManifestDependsOn>
@@ -648,25 +650,28 @@
 		    removed.
 
 		Mirrors the dotnet.js fingerprint handling above: one target for the build
-		output, one for the publish output. `WriteFileVerbatimTask_v0` is used for
-		the same reason it is used there (the built-in WriteLinesToFile corrupts
-		backslash sequences in JS content). Parentheses inside the replacement
-		strings are escaped as %28 / %29 so MSBuild does not parse them as property
-		function syntax.
+		output, one for the publish output. The read/replace/verify/write itself is
+		done by the PatchWebGLNativeJsForMaxMemoryTask_v0 task, which streams the file
+		rather than routing its content through MSBuild properties or task parameters
+		(those get captured in binary logs for a ~hundreds-of-KB file).
 	-->
 	<Target Name="_UnoPatchWebGLNativeJsForMaxMemory"
 			AfterTargets="Build"
-			Condition="'@(WasmShellExtraEmccFlags)' != '' AND '$(WasmBuildingForNestedPublish)' != 'true'">
+			Condition="'$(WasmBuildingForNestedPublish)' != 'true' AND ('@(WasmShellExtraEmccFlags)' != '' OR ('$(EmccFlags)' != '' AND $(EmccFlags.Contains('MAXIMUM_MEMORY=4GB'))))">
 
 		<!--
-			Item references (@(...)) are NOT expanded inside a property-function
-			string argument, so the 4GB flag cannot be detected with
-			[System.String]::Copy('@(WasmShellExtraEmccFlags)').Contains(...).
-			Flatten the flags into a property first, then test that property.
+			Detect the 4GB opt-in from BOTH the documented WasmShellExtraEmccFlags
+			item and the legacy $(EmccFlags) compatibility property (which
+			_UnoAdjustCompatibility folds the items into), so the backport applies
+			regardless of how the flag is wired (item Include vs -p:EmccFlags=...).
+			Item refs (@(...)) do not expand inside a property-function argument, so
+			the items are flattened into a property first.
 		-->
 		<PropertyGroup>
-			<_UnoExtraEmccFlagsFlat>@(WasmShellExtraEmccFlags)</_UnoExtraEmccFlagsFlat>
-			<_UnoPatchWebGLFor4Gb>$(_UnoExtraEmccFlagsFlat.Contains('MAXIMUM_MEMORY=4GB'))</_UnoPatchWebGLFor4Gb>
+			<_UnoWebGLExtraEmccFlagsFlat>@(WasmShellExtraEmccFlags)</_UnoWebGLExtraEmccFlagsFlat>
+			<_UnoPatchWebGLFor4Gb>false</_UnoPatchWebGLFor4Gb>
+			<_UnoPatchWebGLFor4Gb Condition="$(_UnoWebGLExtraEmccFlagsFlat.Contains('MAXIMUM_MEMORY=4GB'))">true</_UnoPatchWebGLFor4Gb>
+			<_UnoPatchWebGLFor4Gb Condition="'$(EmccFlags)' != '' AND $(EmccFlags.Contains('MAXIMUM_MEMORY=4GB'))">true</_UnoPatchWebGLFor4Gb>
 		</PropertyGroup>
 
 		<ItemGroup Condition="'$(_UnoPatchWebGLFor4Gb)' == 'true'">
@@ -679,44 +684,17 @@
 		<Warning Condition="'$(_UnoPatchWebGLFor4Gb)' == 'true' AND @(_UnoWebGLNativeJs->Count()) &gt; 1"
 				 Text="[Uno] Expected a single _framework/dotnet.native.*.js but found @(_UnoWebGLNativeJs->Count()); the 4GB WebGL fix (emscripten #21980) was not applied to the build output." />
 
-		<PropertyGroup Condition="'$(_UnoPatchWebGLFor4Gb)' == 'true' AND @(_UnoWebGLNativeJs->Count()) == 1">
-			<_UnoWebGLNativeJsPath>@(_UnoWebGLNativeJs->'%(FullPath)')</_UnoWebGLNativeJsPath>
-			<_UnoWebGLNativeJsContent Condition="Exists('$(_UnoWebGLNativeJsPath)')">$([System.IO.File]::ReadAllText('$(_UnoWebGLNativeJsPath)'))</_UnoWebGLNativeJsContent>
-			<_UnoWebGLAlreadyPatched>$(_UnoWebGLNativeJsContent.Contains('GL.unpackRowLength = param'))</_UnoWebGLAlreadyPatched>
-			<!--
-				Only files that actually link emscripten's WebGL glue are relevant.
-				`unpackAlignment` is a stable sentinel for that glue (and is not one of
-				the tokens we rewrite). During publish the build-output dotnet.native.js
-				is the pre-relink stock runtime, which has no WebGL glue at all — without
-				this gate the stale-backport warning below would cry wolf on every publish
-				(and on any app that does not render with WebGL).
-			-->
-			<_UnoWebGLHasGlue>$(_UnoWebGLNativeJsContent.Contains('unpackAlignment'))</_UnoWebGLHasGlue>
-			<!--
-				Compute the patched content once, then verify BOTH replacements actually
-				matched. If a future emscripten changes the glue text, the Replace() calls
-				silently become no-ops; without this post-condition the target would rewrite
-				the file unchanged and falsely report success, leaving 4GB builds unpatched.
-				The two marker substrings are paren-free so no MSBuild %28/%29 escaping is
-				needed inside the Contains() arguments.
-			-->
-			<_UnoWebGLPatchedContent Condition="'$(_UnoWebGLHasGlue)' == 'true' AND '$(_UnoWebGLAlreadyPatched)' != 'true'">$(_UnoWebGLNativeJsContent.Replace('GL.unpackAlignment = param;', 'GL.unpackAlignment = param; } else if %28pname == 3314%29 /* GL_UNPACK_ROW_LENGTH */ { GL.unpackRowLength = param;').Replace('var plainRowSize = width * sizePerPixel;', 'var plainRowSize = %28GL.unpackRowLength || width%29 * sizePerPixel;'))</_UnoWebGLPatchedContent>
-			<_UnoWebGLPatchApplied>false</_UnoWebGLPatchApplied>
-			<_UnoWebGLPatchApplied Condition="'$(_UnoWebGLPatchedContent)' != '' AND $(_UnoWebGLPatchedContent.Contains('GL.unpackRowLength = param')) AND $(_UnoWebGLPatchedContent.Contains('GL.unpackRowLength || width'))">true</_UnoWebGLPatchApplied>
-		</PropertyGroup>
-
-		<WriteFileVerbatimTask_v0
-			Condition="'$(_UnoWebGLPatchApplied)' == 'true'"
-			Path="$(_UnoWebGLNativeJsPath)"
-			Content="$(_UnoWebGLPatchedContent)" />
-
-		<Message Condition="'$(_UnoWebGLPatchApplied)' == 'true'"
-				 Importance="high"
-				 Text="[Uno] Backported GL_UNPACK_ROW_LENGTH fix (emscripten #21980) into $(_UnoWebGLNativeJsPath) for 4GB memory support." />
-
-		<!-- WebGL glue is present but our tokens did not produce the marker: the backport is stale. -->
-		<Warning Condition="'$(_UnoWebGLHasGlue)' == 'true' AND '$(_UnoWebGLAlreadyPatched)' != 'true' AND '$(_UnoWebGLPatchApplied)' != 'true'"
-				 Text="[Uno] The 4GB WebGL fix (emscripten #21980) could NOT be applied to $(_UnoWebGLNativeJsPath): the expected emscripten GL glue tokens were not found. The runtime's emscripten version likely changed — update the backport in Uno.Wasm.Bootstrap.targets." />
+		<!--
+			The task streams the file (read once / write once): it skips files without
+			the WebGL glue (the pre-relink stock runtime seen during publish, and
+			non-WebGL apps), is idempotent, self-verifies both replacements landed, and
+			logs success or — on emscripten token drift — a warning. Routing the
+			~hundreds-of-KB content through MSBuild properties / task parameters (which
+			get captured in binary logs) is avoided entirely.
+		-->
+		<PatchWebGLNativeJsForMaxMemoryTask_v0
+			Condition="'$(_UnoPatchWebGLFor4Gb)' == 'true' AND @(_UnoWebGLNativeJs->Count()) == 1"
+			File="@(_UnoWebGLNativeJs)" />
 	</Target>
 
 	<!--
@@ -730,12 +708,14 @@
 	-->
 	<Target Name="_UnoPatchWebGLNativeJsForMaxMemoryPublishOutput"
 			AfterTargets="Publish;WasmTriggerPublishApp"
-			Condition="'@(WasmShellExtraEmccFlags)' != '' AND '$(WasmBuildingForNestedPublish)' != 'true'">
+			Condition="'$(WasmBuildingForNestedPublish)' != 'true' AND ('@(WasmShellExtraEmccFlags)' != '' OR ('$(EmccFlags)' != '' AND $(EmccFlags.Contains('MAXIMUM_MEMORY=4GB'))))">
 
-		<!-- See the build-output target above for why the 4GB flag is detected via a flattened property. -->
+		<!-- See the build-output target above for how the 4GB flag is detected (both flag sources). -->
 		<PropertyGroup>
-			<_UnoExtraEmccFlagsFlat>@(WasmShellExtraEmccFlags)</_UnoExtraEmccFlagsFlat>
-			<_UnoPatchWebGLFor4Gb>$(_UnoExtraEmccFlagsFlat.Contains('MAXIMUM_MEMORY=4GB'))</_UnoPatchWebGLFor4Gb>
+			<_UnoWebGLExtraEmccFlagsFlat>@(WasmShellExtraEmccFlags)</_UnoWebGLExtraEmccFlagsFlat>
+			<_UnoPatchWebGLFor4Gb>false</_UnoPatchWebGLFor4Gb>
+			<_UnoPatchWebGLFor4Gb Condition="$(_UnoWebGLExtraEmccFlagsFlat.Contains('MAXIMUM_MEMORY=4GB'))">true</_UnoPatchWebGLFor4Gb>
+			<_UnoPatchWebGLFor4Gb Condition="'$(EmccFlags)' != '' AND $(EmccFlags.Contains('MAXIMUM_MEMORY=4GB'))">true</_UnoPatchWebGLFor4Gb>
 		</PropertyGroup>
 
 		<!--
@@ -765,38 +745,22 @@
 		<Warning Condition="'$(_UnoPatchWebGLFor4Gb)' == 'true' AND @(_UnoWebGLNativeJsPublish->Count()) &gt; 1"
 				 Text="[Uno] Expected a single published _framework/dotnet.native.*.js but found @(_UnoWebGLNativeJsPublish->Count()); the 4GB WebGL fix (emscripten #21980) was not applied to the publish output." />
 
-		<PropertyGroup Condition="@(_UnoWebGLNativeJsPublish->Count()) == 1">
-			<_UnoWebGLNativeJsPublishPath>@(_UnoWebGLNativeJsPublish->'%(FullPath)')</_UnoWebGLNativeJsPublishPath>
-			<_UnoWebGLNativeJsPublishContent Condition="Exists('$(_UnoWebGLNativeJsPublishPath)')">$([System.IO.File]::ReadAllText('$(_UnoWebGLNativeJsPublishPath)'))</_UnoWebGLNativeJsPublishContent>
-			<_UnoWebGLPublishAlreadyPatched>$(_UnoWebGLNativeJsPublishContent.Contains('GL.unpackRowLength = param'))</_UnoWebGLPublishAlreadyPatched>
-			<!-- See the build-output target: only act on files that actually link the WebGL glue. -->
-			<_UnoWebGLPublishHasGlue>$(_UnoWebGLNativeJsPublishContent.Contains('unpackAlignment'))</_UnoWebGLPublishHasGlue>
-			<!-- Compute once, then verify both replacements matched before writing/deleting/logging. -->
-			<_UnoWebGLPublishPatchedContent Condition="'$(_UnoWebGLPublishHasGlue)' == 'true' AND '$(_UnoWebGLPublishAlreadyPatched)' != 'true'">$(_UnoWebGLNativeJsPublishContent.Replace('GL.unpackAlignment = param;', 'GL.unpackAlignment = param; } else if %28pname == 3314%29 /* GL_UNPACK_ROW_LENGTH */ { GL.unpackRowLength = param;').Replace('var plainRowSize = width * sizePerPixel;', 'var plainRowSize = %28GL.unpackRowLength || width%29 * sizePerPixel;'))</_UnoWebGLPublishPatchedContent>
-			<_UnoWebGLPublishPatchApplied>false</_UnoWebGLPublishPatchApplied>
-			<_UnoWebGLPublishPatchApplied Condition="'$(_UnoWebGLPublishPatchedContent)' != '' AND $(_UnoWebGLPublishPatchedContent.Contains('GL.unpackRowLength = param')) AND $(_UnoWebGLPublishPatchedContent.Contains('GL.unpackRowLength || width'))">true</_UnoWebGLPublishPatchApplied>
-		</PropertyGroup>
+		<!-- See the build-output target: the task streams the file, skips non-WebGL/stock
+		     files, self-verifies, and logs. Applied=true only when it rewrote the file. -->
+		<PatchWebGLNativeJsForMaxMemoryTask_v0
+			Condition="'$(_UnoPatchWebGLFor4Gb)' == 'true' AND @(_UnoWebGLNativeJsPublish->Count()) == 1"
+			File="@(_UnoWebGLNativeJsPublish)">
+			<Output TaskParameter="Applied" PropertyName="_UnoWebGLPublishApplied" />
+		</PatchWebGLNativeJsForMaxMemoryTask_v0>
 
-		<WriteFileVerbatimTask_v0
-			Condition="'$(_UnoWebGLPublishPatchApplied)' == 'true'"
-			Path="$(_UnoWebGLNativeJsPublishPath)"
-			Content="$(_UnoWebGLPublishPatchedContent)" />
-
-		<!-- Only drop the stale compressed siblings once we have actually rewritten the file. -->
-		<ItemGroup Condition="'$(_UnoWebGLPublishPatchApplied)' == 'true'">
-			<_UnoStaleCompressedWebGLNativeJs Include="$(_UnoWebGLNativeJsPublishPath).gz;$(_UnoWebGLNativeJsPublishPath).br" />
+		<!-- Drop the stale pre-compressed siblings only once the file was actually rewritten,
+		     so a content-negotiating server cannot serve the unpatched compressed copy. -->
+		<ItemGroup Condition="'$(_UnoWebGLPublishApplied)' == 'true'">
+			<_UnoStaleCompressedWebGLNativeJs Include="@(_UnoWebGLNativeJsPublish->'%(FullPath).gz');@(_UnoWebGLNativeJsPublish->'%(FullPath).br')" />
 		</ItemGroup>
 
 		<Delete Files="@(_UnoStaleCompressedWebGLNativeJs)"
 				Condition="'@(_UnoStaleCompressedWebGLNativeJs)' != ''" />
-
-		<Message Condition="'$(_UnoWebGLPublishPatchApplied)' == 'true'"
-				 Importance="high"
-				 Text="[Uno] Backported GL_UNPACK_ROW_LENGTH fix (emscripten #21980) into published $(_UnoWebGLNativeJsPublishPath) for 4GB memory support." />
-
-		<!-- WebGL glue is present but our tokens did not produce the marker: the backport is stale. -->
-		<Warning Condition="'$(_UnoWebGLPublishHasGlue)' == 'true' AND '$(_UnoWebGLPublishAlreadyPatched)' != 'true' AND '$(_UnoWebGLPublishPatchApplied)' != 'true'"
-				 Text="[Uno] The 4GB WebGL fix (emscripten #21980) could NOT be applied to published $(_UnoWebGLNativeJsPublishPath): the expected emscripten GL glue tokens were not found. The runtime's emscripten version likely changed — update the backport in Uno.Wasm.Bootstrap.targets." />
 	</Target>
 
 	<PropertyGroup>
