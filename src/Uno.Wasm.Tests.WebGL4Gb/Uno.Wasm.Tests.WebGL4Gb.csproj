@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <!-- Set to false (-p:Enable4Gb=false) to exercise the negative case: a
+         native (relinked) build with no 4GB flag must NOT be patched. -->
+    <Enable4Gb Condition="'$(Enable4Gb)' == ''">true</Enable4Gb>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <WasmShellExtraEmccFlags Condition="'$(Enable4Gb)' != 'false'" Include="-s MAXIMUM_MEMORY=4GB" />
+    <NativeFileReference Include="webgl-force-link.c" />
+  </ItemGroup>
+
+  <Import Project="..\Uno.Wasm.Bootstrap\build\Uno.Wasm.Bootstrap.props" />
+  <Import Project="..\Uno.Wasm.Bootstrap\build\Uno.Wasm.Bootstrap.targets" />
+</Project>

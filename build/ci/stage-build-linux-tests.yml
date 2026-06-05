@@ -40,6 +40,14 @@ jobs:
       ./test-fingerprint.sh
     displayName: Fingerprint Test (dedicated test project)
 
+  ## WebGL 4GB fix test - validates the emscripten GL_UNPACK_ROW_LENGTH backport (#21980)
+  ## is applied to dotnet.native.js when MAXIMUM_MEMORY=4GB, and skipped otherwise
+  - bash: |
+      cd $(build.sourcesdirectory)/src/Uno.Wasm.Tests.WebGL4Gb
+      chmod +x test-webgl-4gb.sh
+      ./test-webgl-4gb.sh
+    displayName: WebGL 4GB Fix Test (dedicated test project)
+
   - bash: |
       cd $(build.sourcesdirectory)/src
       dotnet publish -c Release /m:1 Uno.Wasm.Bootstrap-netcore-only.slnf /bl:$(build.artifactstagingdirectory)/SampleNet5.binlog
