@@ -738,23 +738,31 @@
 			<_UnoPatchWebGLFor4Gb>$(_UnoExtraEmccFlagsFlat.Contains('MAXIMUM_MEMORY=4GB'))</_UnoPatchWebGLFor4Gb>
 		</PropertyGroup>
 
+		<!--
+			Use target-private property names (_UnoWebGL*PublishDir). The publish-dir
+			resolution is copied from _UnoUpdateDotnetJsFingerprintPublishOutput, which
+			sets a property named _UnoActualPublishDir; reusing that name here would let
+			its value leak in when our 4GB block is skipped, so the file discovery below
+			(gated on a non-empty dir) could patch a NON-4GB publish. Distinct names plus
+			the explicit _UnoPatchWebGLFor4Gb gate keep this target inert unless 4GB is on.
+		-->
 		<PropertyGroup Condition="'$(_UnoPatchWebGLFor4Gb)' == 'true'">
-			<_UnoAbsolutePublishDir Condition="'$(PublishDir)' != ''">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/$(PublishDir)'))</_UnoAbsolutePublishDir>
-			<_UnoActualPublishDir Condition="'$(_UnoAbsolutePublishDir)' != '' AND Exists('$(_UnoAbsolutePublishDir)')">$(_UnoAbsolutePublishDir)</_UnoActualPublishDir>
-			<_UnoActualPublishDir Condition="'$(_UnoActualPublishDir)' == '' AND '$(PublishDir)' != '' AND Exists('$(PublishDir)')">$([System.IO.Path]::GetFullPath('$(PublishDir)'))</_UnoActualPublishDir>
-			<_UnoActualPublishDir Condition="'$(_UnoActualPublishDir)' == '' AND Exists('$(OutputPath)publish/')">$([System.IO.Path]::GetFullPath('$(OutputPath)publish/'))</_UnoActualPublishDir>
-			<_UnoActualPublishDir Condition="'$(_UnoActualPublishDir)' == '' AND Exists('$(OutDir)publish/')">$([System.IO.Path]::GetFullPath('$(OutDir)publish/'))</_UnoActualPublishDir>
-			<_UnoActualPublishDir Condition="'$(_UnoActualPublishDir)' == '' AND Exists('$(MSBuildProjectDirectory)/bin/$(Configuration)/$(TargetFramework)/publish/')">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/bin/$(Configuration)/$(TargetFramework)/publish/'))</_UnoActualPublishDir>
+			<_UnoWebGLAbsolutePublishDir Condition="'$(PublishDir)' != ''">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/$(PublishDir)'))</_UnoWebGLAbsolutePublishDir>
+			<_UnoWebGLActualPublishDir Condition="'$(_UnoWebGLAbsolutePublishDir)' != '' AND Exists('$(_UnoWebGLAbsolutePublishDir)')">$(_UnoWebGLAbsolutePublishDir)</_UnoWebGLActualPublishDir>
+			<_UnoWebGLActualPublishDir Condition="'$(_UnoWebGLActualPublishDir)' == '' AND '$(PublishDir)' != '' AND Exists('$(PublishDir)')">$([System.IO.Path]::GetFullPath('$(PublishDir)'))</_UnoWebGLActualPublishDir>
+			<_UnoWebGLActualPublishDir Condition="'$(_UnoWebGLActualPublishDir)' == '' AND Exists('$(OutputPath)publish/')">$([System.IO.Path]::GetFullPath('$(OutputPath)publish/'))</_UnoWebGLActualPublishDir>
+			<_UnoWebGLActualPublishDir Condition="'$(_UnoWebGLActualPublishDir)' == '' AND Exists('$(OutDir)publish/')">$([System.IO.Path]::GetFullPath('$(OutDir)publish/'))</_UnoWebGLActualPublishDir>
+			<_UnoWebGLActualPublishDir Condition="'$(_UnoWebGLActualPublishDir)' == '' AND Exists('$(MSBuildProjectDirectory)/bin/$(Configuration)/$(TargetFramework)/publish/')">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/bin/$(Configuration)/$(TargetFramework)/publish/'))</_UnoWebGLActualPublishDir>
 		</PropertyGroup>
 
-		<ItemGroup Condition="'$(_UnoActualPublishDir)' != ''">
-			<_UnoWebGLNativeJsPublish Include="$(_UnoActualPublishDir)wwwroot/_framework/dotnet.native.*.js" />
+		<ItemGroup Condition="'$(_UnoPatchWebGLFor4Gb)' == 'true' AND '$(_UnoWebGLActualPublishDir)' != ''">
+			<_UnoWebGLNativeJsPublish Include="$(_UnoWebGLActualPublishDir)wwwroot/_framework/dotnet.native.*.js" />
 		</ItemGroup>
 
-		<Warning Condition="'$(_UnoPatchWebGLFor4Gb)' == 'true' AND '$(_UnoActualPublishDir)' != '' AND @(_UnoWebGLNativeJsPublish->Count()) == 0"
-				 Text="[Uno] 4GB flag is set but no _framework/dotnet.native.*.js was found in the publish output ($(_UnoActualPublishDir)wwwroot/_framework/); the WebGL fix (emscripten #21980) was not applied. The publish layout may have changed." />
+		<Warning Condition="'$(_UnoPatchWebGLFor4Gb)' == 'true' AND '$(_UnoWebGLActualPublishDir)' != '' AND @(_UnoWebGLNativeJsPublish->Count()) == 0"
+				 Text="[Uno] 4GB flag is set but no _framework/dotnet.native.*.js was found in the publish output ($(_UnoWebGLActualPublishDir)wwwroot/_framework/); the WebGL fix (emscripten #21980) was not applied. The publish layout may have changed." />
 
-		<Warning Condition="@(_UnoWebGLNativeJsPublish->Count()) &gt; 1"
+		<Warning Condition="'$(_UnoPatchWebGLFor4Gb)' == 'true' AND @(_UnoWebGLNativeJsPublish->Count()) &gt; 1"
 				 Text="[Uno] Expected a single published _framework/dotnet.native.*.js but found @(_UnoWebGLNativeJsPublish->Count()); the 4GB WebGL fix (emscripten #21980) was not applied to the publish output." />
 
 		<PropertyGroup Condition="@(_UnoWebGLNativeJsPublish->Count()) == 1">

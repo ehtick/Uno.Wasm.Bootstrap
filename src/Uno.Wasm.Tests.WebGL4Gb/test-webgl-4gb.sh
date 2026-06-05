@@ -58,6 +58,19 @@ assert_patched() {
     echo -e "${GREEN}✓ Fix applied (marker, branch, row-size rewrite present; original token replaced)${NC}"
 }
 
+assert_no_stale_compressed() {
+    # $1 = native js path. The publish target deletes stale .br/.gz so a content-negotiating
+    # server cannot serve the unpatched compressed bytes.
+    local njs="$1"
+    if [ -f "$njs.br" ]; then
+        echo -e "${RED}❌ FAIL: stale compressed copy exists: $njs.br${NC}"; exit 1
+    fi
+    if [ -f "$njs.gz" ]; then
+        echo -e "${RED}❌ FAIL: stale compressed copy exists: $njs.gz${NC}"; exit 1
+    fi
+    echo -e "${GREEN}✓ No stale .br/.gz copies of the patched dotnet.native.js${NC}"
+}
+
 # ---------------------------------------------------------------------------
 echo ""
 echo "📦 Test 1: Build with MAXIMUM_MEMORY=4GB (expect fix applied)"
@@ -75,17 +88,7 @@ echo "----------------------------------------"
 dotnet publish "$PROJECT_FILE" -c Release /m:1
 PUBLISH_NJS="$(find_native_js "$PROJECT_DIR/bin/Release/net10.0/publish/wwwroot")"
 assert_patched "$PUBLISH_NJS"
-
-if [ -f "$PUBLISH_NJS.br" ]; then
-    echo -e "${RED}❌ FAIL: stale compressed copy exists: $PUBLISH_NJS.br${NC}"
-    echo "  A content-negotiating server would serve the unpatched compressed bytes."
-    exit 1
-fi
-if [ -f "$PUBLISH_NJS.gz" ]; then
-    echo -e "${RED}❌ FAIL: stale compressed copy exists: $PUBLISH_NJS.gz${NC}"
-    exit 1
-fi
-echo -e "${GREEN}✓ No stale .br/.gz copies of the patched dotnet.native.js${NC}"
+assert_no_stale_compressed "$PUBLISH_NJS"
 
 # Note: we deliberately do NOT run `node --check` on the patched dotnet.native.js.
 # The .NET runtime emits it as an ES module using modern syntax (import.meta,
@@ -96,8 +99,63 @@ echo -e "${GREEN}✓ No stale .br/.gz copies of the patched dotnet.native.js${NC
 # intended, well-formed edit.
 
 # ---------------------------------------------------------------------------
+# The publish-output target resolves the publish directory through a fallback
+# chain (PublishDir / -o / OutputPath / OutDir / conventional bin path), the same
+# logic that has repeatedly broken for dotnet.js fingerprinting. The next three
+# scenarios exercise the override paths a default `dotnet publish` does NOT.
 echo ""
-echo "🚫 Test 3: Build WITHOUT the 4GB flag (-p:Enable4Gb=false) — expect NO patch"
+echo "📤 Test 3: Publish with -o output flag (override publish path)"
+echo "----------------------------------------"
+OUT_FLAG_DIR="$(mktemp -d)/publish-o"
+dotnet publish "$PROJECT_FILE" -c Release /m:1 -o "$OUT_FLAG_DIR"
+OUT_FLAG_NJS="$(find_native_js "$OUT_FLAG_DIR/wwwroot")"
+assert_patched "$OUT_FLAG_NJS"
+assert_no_stale_compressed "$OUT_FLAG_NJS"
+
+echo ""
+echo "📤 Test 4: Publish with explicit PublishDir property (override publish path)"
+echo "----------------------------------------"
+PUBLISHDIR_PROP="$(mktemp -d)/publish-dir-prop/"
+dotnet publish "$PROJECT_FILE" -c Release /m:1 -p:PublishDir="$PUBLISHDIR_PROP"
+PUBLISHDIR_NJS="$(find_native_js "${PUBLISHDIR_PROP}wwwroot")"
+assert_patched "$PUBLISHDIR_NJS"
+assert_no_stale_compressed "$PUBLISHDIR_NJS"
+
+echo ""
+echo "📤 Test 5: Build then publish as separate commands (fingerprint historically desynced here)"
+echo "----------------------------------------"
+rm -rf "$PROJECT_DIR/bin" "$PROJECT_DIR/obj"
+dotnet build "$PROJECT_FILE" -c Release /m:1
+dotnet publish "$PROJECT_FILE" -c Release /m:1
+BTP_NJS="$(find_native_js "$PROJECT_DIR/bin/Release/net10.0/publish/wwwroot")"
+assert_patched "$BTP_NJS"
+assert_no_stale_compressed "$BTP_NJS"
+
+echo ""
+echo "🔄 Test 6: Nested publish (WasmBuildingForNestedPublish=true) — targets must skip cleanly"
+echo "----------------------------------------"
+# The .NET WASM SDK's inner publish pass runs with WasmBuildingForNestedPublish=true and
+# PublishDir pointing at an intermediate where the runtime glue is not finalized. Our targets
+# must skip in that context (they key off this property), neither failing the build nor emitting
+# the "could NOT be applied" stale-backport warning on the intermediate.
+NESTED_LOG="$(mktemp)"
+set +e
+dotnet publish "$PROJECT_FILE" -c Release /m:1 -p:WasmBuildingForNestedPublish=true > "$NESTED_LOG" 2>&1
+NESTED_EXIT=$?
+set -e
+if [ "$NESTED_EXIT" -ne 0 ]; then
+    echo -e "${RED}❌ FAIL: nested publish failed (exit $NESTED_EXIT)${NC}"; cat "$NESTED_LOG"; rm -f "$NESTED_LOG"; exit 1
+fi
+if grep -q "could NOT be applied" "$NESTED_LOG"; then
+    echo -e "${RED}❌ FAIL: WebGL targets ran during nested publish (emitted the stale-backport warning)${NC}"
+    grep "could NOT be applied" "$NESTED_LOG"; rm -f "$NESTED_LOG"; exit 1
+fi
+rm -f "$NESTED_LOG"
+echo -e "${GREEN}✓ Nested publish completed without running the WebGL targets${NC}"
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "🚫 Test 7: Build WITHOUT the 4GB flag (-p:Enable4Gb=false) — expect NO patch"
 echo "----------------------------------------"
 rm -rf "$PROJECT_DIR/bin" "$PROJECT_DIR/obj"
 dotnet build "$PROJECT_FILE" -c Release /m:1 -p:Enable4Gb=false
