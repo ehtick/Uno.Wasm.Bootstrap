@@ -23,6 +23,11 @@ PATCH_BRANCH='GL_UNPACK_ROW_LENGTH'
 PATCH_ROWSIZE='(GL.unpackRowLength || width)'
 ORIGINAL_ROWSIZE='var plainRowSize = width * sizePerPixel;'
 
+# Exact assignment the bootstrap must emit into uno-config.js when the 4GB flag is present, so the
+# hosted app can read back the heap ceiling it was linked with (e.g. to size memory-pressure tiers).
+MAXMEM_ENV_NAME='UNO_BOOTSTRAP_EMSCRIPTEN_MAXIMUM_MEMORY'
+MAXMEM_ENV_ASSIGNMENT='"UNO_BOOTSTRAP_EMSCRIPTEN_MAXIMUM_MEMORY"] = "4GB"'
+
 echo "========================================="
 echo "Testing 4GB WebGL fix (emscripten #21980 backport)"
 echo "========================================="
@@ -58,6 +63,41 @@ assert_patched() {
     echo -e "${GREEN}✓ Fix applied (marker, branch, row-size rewrite present; original token replaced)${NC}"
 }
 
+find_uno_config() {
+    # $1 = wwwroot root; echoes the app's uno-config.js (the package_<hash> one, not a worker copy).
+    find "$1" -path '*/package_*/uno-config.js' ! -path '*/worker/*' 2>/dev/null | head -1
+}
+
+assert_maxmem_env() {
+    # $1 = wwwroot root. The bootstrap must emit UNO_BOOTSTRAP_EMSCRIPTEN_MAXIMUM_MEMORY=4GB into
+    # uno-config.js whenever the app links with -s MAXIMUM_MEMORY=4GB. Without it the heap ceiling
+    # is invisible to managed code (this regressed once: the detection read an empty EmccFlags item).
+    local cfg
+    cfg="$(find_uno_config "$1")"
+    if [ -z "$cfg" ] || [ ! -f "$cfg" ]; then
+        echo -e "${RED}❌ FAIL: uno-config.js not found under $1${NC}"; exit 1
+    fi
+    echo "  Inspecting: $cfg"
+    if [ "$(count "$cfg" "$MAXMEM_ENV_ASSIGNMENT")" -lt 1 ]; then
+        echo -e "${RED}❌ FAIL: '$MAXMEM_ENV_NAME = \"4GB\"' not emitted into uno-config.js — the 4GB heap ceiling is invisible to the app.${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ uno-config.js exposes $MAXMEM_ENV_NAME=4GB${NC}"
+}
+
+assert_no_maxmem_env() {
+    # $1 = wwwroot root. Without the 4GB flag the env var must NOT be emitted (gating check).
+    local cfg
+    cfg="$(find_uno_config "$1")"
+    if [ -z "$cfg" ] || [ ! -f "$cfg" ]; then
+        echo -e "${RED}❌ FAIL: uno-config.js not found under $1${NC}"; exit 1
+    fi
+    if [ "$(count "$cfg" "$MAXMEM_ENV_NAME")" -ne 0 ]; then
+        echo -e "${RED}❌ FAIL: $MAXMEM_ENV_NAME emitted without the 4GB flag — gating is broken.${NC}"; exit 1
+    fi
+    echo -e "${GREEN}✓ uno-config.js does not expose $MAXMEM_ENV_NAME (no-flag build)${NC}"
+}
+
 assert_no_stale_compressed() {
     # $1 = native js path. The publish target deletes stale .br/.gz so a content-negotiating
     # server cannot serve the unpatched compressed bytes.
@@ -80,6 +120,7 @@ rm -rf "$PROJECT_DIR/bin" "$PROJECT_DIR/obj"
 dotnet build "$PROJECT_FILE" -c Release /m:1
 BUILD_NJS="$(find_native_js "$PROJECT_DIR/bin/Release/net10.0/wwwroot")"
 assert_patched "$BUILD_NJS"
+assert_maxmem_env "$PROJECT_DIR/bin/Release/net10.0/wwwroot"
 
 # ---------------------------------------------------------------------------
 echo ""
@@ -171,6 +212,7 @@ if [ "$(count "$NOFLAG_NJS" "$ORIGINAL_ROWSIZE")" -lt 1 ]; then
     echo "  (The WebGL glue should still be linked via webgl-force-link.c — this points at a setup change.)"
     exit 1
 fi
+assert_no_maxmem_env "$PROJECT_DIR/bin/Release/net10.0/wwwroot"
 echo -e "${GREEN}✓ No-flag build is unpatched (gating works), and the WebGL glue is present${NC}"
 
 echo ""
