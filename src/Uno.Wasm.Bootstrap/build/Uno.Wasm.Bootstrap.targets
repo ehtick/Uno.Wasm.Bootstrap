@@ -256,7 +256,13 @@
 			<!-- Jiterpreter compatibility -->
 			<BlazorWebAssemblyJiterpreter Condition=" '$(WasmShellEnableJiterpreter)' != '' AND '$(BlazorWebAssemblyJiterpreter)' == '' ">$(WasmShellEnableJiterpreter)</BlazorWebAssemblyJiterpreter>
 
-			<!-- EMCC flags compatibility -->
+			<!--
+				EMCC flags compatibility. NOTE: EmccFlags is only ever a (semicolon-delimited)
+				property — there is no EmccFlags item — so ShellTask_v0 must be invoked with
+				EmccFlags="$(EmccFlags)" (property), NOT "@(EmccFlags)" (item, which binds empty).
+				The MAXIMUM_MEMORY=4GB detection that emits UNO_BOOTSTRAP_EMSCRIPTEN_MAXIMUM_MEMORY
+				depends on the task actually receiving these flags.
+			-->
 			<EmccFlags>$(EmccFlags);@(WasmShellExtraEmccFlags)</EmccFlags>
 
 			<EmccFlags Condition=" '$(WasmShellEnableEmccProfiling)' == 'true' ">$(EmccFlags);--profiling</EmccFlags>
@@ -430,7 +436,7 @@
 			CurrentProjectPath="$(MSBuildProjectDirectory)"
 			EmbeddedResources="@(EmbeddedResource)"
 			EmccExportedRuntimeMethod="@(EmccExportedRuntimeMethod)"
-			EmccFlags="@(EmccFlags)"
+			EmccFlags="$(EmccFlags)"
 			EnableLogProfiler="$(WasmShellEnableLogProfiler)"
 			EnableMemoryProfiler="$(WasmShellEnableWasmMemoryProfiler)"
 			EnableThreads="@(WasmEnableThreads)"
