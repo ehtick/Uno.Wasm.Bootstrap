@@ -13,6 +13,7 @@
 		<Nullable>enable</Nullable>
 		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 		<IsPublishable>false</IsPublishable>
+		<_MonoCecilPackageVersion>0.11.6</_MonoCecilPackageVersion>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(NBGV_GitCommitId)'!=''">
@@ -33,7 +34,7 @@
 		<PackageReference Include="Microsoft.Build.Framework" Version="15.3.409" PrivateAssets="All" />
 		<PackageReference Include="Microsoft.Build.Utilities.Core" Version="15.3.409" PrivateAssets="All" />
 		<PackageReference Include="Microsoft.Build.Tasks.Core" Version="15.3.409" PrivateAssets="All" />
-		<PackageReference Include="Mono.Cecil" Version="0.11.4" PrivateAssets="All" />
+		<PackageReference Include="Mono.Cecil" Version="$(_MonoCecilPackageVersion)" PrivateAssets="All" />
 		<PackageReference Include="Mono.Options" Version="5.3.0.1" PrivateAssets="All" />
 		<PackageReference Include="MSBuildTasks" Version="1.5.0.235" PrivateAssets="All" />
 		<PackageReference Include="System.Text.Json" Version="8.0.5" PrivateAssets="All" />
@@ -58,7 +59,7 @@
 			<PackagePath>tools/templates</PackagePath>
 		</None>
 
-		<None Include="$(NuGetPackageRoot)/mono.cecil/0.11.4/lib/netstandard2.0/*.dll">
+		<None Include="$(NuGetPackageRoot)/mono.cecil/$(_MonoCecilPackageVersion)/lib/netstandard2.0/*.dll">
 			<Pack>true</Pack>
 			<PackagePath>tools</PackagePath>
 			<Visible>false</Visible>
@@ -78,7 +79,7 @@
 			pick them up as transitive output content
 		-->
 		<ItemGroup>
-			<_UnoTaskDependencies Include="$(NuGetPackageRoot)/mono.cecil/0.11.4/lib/netstandard2.0/*.dll" />
+			<_UnoTaskDependencies Include="$(NuGetPackageRoot)/mono.cecil/$(_MonoCecilPackageVersion)/lib/netstandard2.0/*.dll" />
 			<_UnoTaskDependencies Include="$(NuGetPackageRoot)/newtonsoft.json/13.0.2/lib/netstandard2.0/*.dll" />
 		</ItemGroup>
 		<Copy SourceFiles="@(_UnoTaskDependencies)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
