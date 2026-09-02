@@ -3,7 +3,7 @@
 	<PropertyGroup>
 		<TargetFramework>netstandard2.0</TargetFramework>
 		<DefineConstants>NET_CORE</DefineConstants>
-		<NoWarn>1701;1702;1705;649;NU5128;NU1903</NoWarn>
+		<NoWarn>1701;1702;1705;649;NU5128</NoWarn>
 		<AssemblyName>Uno.Wasm.Bootstrap.v0</AssemblyName>
 		<RootNamespace>Uno.Wasm.Bootstrap.v0</RootNamespace>
 		<PackageId>Uno.Wasm.Bootstrap</PackageId>
